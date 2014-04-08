@@ -1,24 +1,29 @@
-# This is a template for a Ruby scraper on Morph (https://morph.io)
-# including some code snippets below that you should find helpful
+require 'scraper'
 
-# require 'scraperwiki'
-# require 'mechanize'
-#
-# agent = Mechanize.new
-#
-# # Read in a page
-# page = agent.get("http://foo.com")
-#
-# # Find somehing on the page using css selectors
-# p page.at('div.content')
-#
-# # Write out to the sqlite database using scraperwiki library
-# ScraperWiki.save_sqlite(["name"], {"name" => "susan", "occupation" => "software developer"})
-#
-# # An arbitrary query against the database
-# ScraperWiki.select("* from data where 'name'='peter'")
-
-# You don't have to do things with the Mechanize or ScraperWiki libraries. You can use whatever gems are installed
-# on Morph for Ruby (https://github.com/openaustralia/morph-docker-ruby/blob/master/Gemfile) and all that matters
-# is that your final data is written to an Sqlite database called data.sqlite in the current working directory which
-# has at least a table called data.
+class WarringahScraper < Scraper
+  def applications(date)
+    # XML feed of the applications submitted in the last 14 days
+    url = "http://eservices2.warringah.nsw.gov.au/ePlanning/Public/XC.Track/SearchApplication.aspx?o=xml&d=last14days&t=DevApp"
+    page = Nokogiri::XML(agent.get(url).body)
+    page.search('Application').map do |app|
+      data = {
+        :info_url => "http://eservices2.warringah.nsw.gov.au/ePlanning/Public/XC.Track/SearchApplication.aspx?id=" + app.at('ApplicationId').inner_text,
+        :comment_url => "http://eservices2.warringah.nsw.gov.au/ePlanning/Pages/XC.Track/Submission.aspx?id=#{app.at('ApplicationId').inner_text}",
+        :application_id => app.at('ReferenceNumber').inner_text,
+        :date_received => Date.parse(app.at('LodgementDate').inner_text)
+      }
+      # Some DAs have good descriptions whilst others just have
+      # "<insert here>" so we search for "<insert" and if it's there we
+      # use another more basic description
+      if app.at('ApplicationDetails').nil? || app.at('ApplicationDetails').inner_text.downcase.index(/(<|\()insert/)
+        data[:description] = app.at('NatureOfApplication').inner_text
+      else
+        data[:description] = app.at('ApplicationDetails').inner_text
+      end
+      data[:addresses] = app.xpath('Address').map do |address|
+        address.at('Line1').inner_text + ", " + address.at('Line2').inner_text
+      end
+      DevelopmentApplication.new(data)
+    end
+  end
+end
